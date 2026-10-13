@@ -1,0 +1,8 @@
+site_name: Daily AI Brief
+site_description: Short, cited AI news digests generated every morning
+theme:
+  name: mkdocs
+markdown_extensions:
+  - tables
+  - toc:
+      permalink: true

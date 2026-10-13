@@ -1,0 +1,88 @@
+name: Research, publish, and deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    # GitHub cron uses UTC. 01:30 UTC is 07:00 IST.
+    - cron: "30 1 * * *"
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: daily-ai-blog
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Generate today's digest
+        if: github.event_name != 'push'
+        id: research
+        continue-on-error: true
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          MODEL: ${{ vars.MODEL }}
+        run: python agent.py
+
+      - name: Rebuild homepage
+        run: python build_index.py
+
+      - name: Commit generated post, memory, and logs
+        if: github.event_name != 'push'
+        run: |
+          git config user.name "daily-ai-agent[bot]"
+          git config user.email "daily-ai-agent[bot]@users.noreply.github.com"
+          git add docs/index.md docs/posts memory logs
+          if git diff --cached --quiet; then
+            echo "Nothing new to commit"
+          else
+            git commit -m "blog: add daily AI digest"
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
+
+      - name: Stop if research failed
+        if: github.event_name != 'push' && steps.research.outcome == 'failure'
+        run: exit 1
+
+      - name: Build static website
+        run: mkdocs build --strict
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload website artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy website
+        id: deployment
+        uses: actions/deploy-pages@v4
